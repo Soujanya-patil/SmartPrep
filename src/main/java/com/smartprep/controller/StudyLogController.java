@@ -1,9 +1,11 @@
-package com.smartprep;
+package com.smartprep.controller;
 
+import com.smartprep.model.StudyLog;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import com.smartprep.service.StudyLogService;
 
 @RestController
 @RequestMapping("/api/study")

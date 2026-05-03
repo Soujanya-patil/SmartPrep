@@ -1,4 +1,4 @@
-package com.smartprep;
+package com.smartprep.model;
 
 import jakarta.persistence.*;
 import java.time.LocalDateTime;

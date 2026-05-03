@@ -1,5 +1,7 @@
-package com.smartprep;
+package com.smartprep.service;
 
+import com.smartprep.model.User;
+import com.smartprep.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;

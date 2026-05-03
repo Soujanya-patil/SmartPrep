@@ -1,5 +1,5 @@
-package com.smartprep;
-
+package com.smartprep.repository;
+import com.smartprep.model.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.Optional;
 

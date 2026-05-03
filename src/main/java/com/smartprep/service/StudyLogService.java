@@ -1,5 +1,7 @@
-package com.smartprep;
+package com.smartprep.service;
 
+import com.smartprep.model.StudyLog;
+import com.smartprep.repository.StudyLogRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import java.time.LocalDate;
@@ -12,22 +14,20 @@ public class StudyLogService {
     private StudyLogRepository studyLogRepository;
 
     public StudyLog saveLog(StudyLog log) {
-        log.setStudyDate(LocalDate.now());
         return studyLogRepository.save(log);
     }
 
     public List<StudyLog> getLogs(int userId) {
-        return studyLogRepository.findByUserIdOrderByStudyDateDesc(userId);
+        return studyLogRepository.findByUserId(userId);
     }
 
     public int getStreak(int userId) {
-        List<StudyLog> logs = studyLogRepository.findByUserIdOrderByStudyDateDesc(userId);
+        List<StudyLog> logs = studyLogRepository.findByUserId(userId);
         int streak = 0;
-        LocalDate expected = LocalDate.now();
-        for (StudyLog log : logs) {
-            if (log.getStudyDate().equals(expected)) {
+        LocalDate today = LocalDate.now();
+        for (int i = 0; i < logs.size(); i++) {
+            if (logs.get(i).getStudyDate().equals(today.minusDays(i))) {
                 streak++;
-                expected = expected.minusDays(1);
             } else {
                 break;
             }
