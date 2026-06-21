@@ -1,5 +1,4 @@
 package com.smartprep.model;
-
 import jakarta.persistence.*;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
