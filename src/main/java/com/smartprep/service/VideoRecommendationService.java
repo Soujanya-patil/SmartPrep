@@ -44,6 +44,10 @@ public class VideoRecommendationService {
         }
         return allVideos;
     }
+    public List<VideoDTO> searchVideos(String subject, String chapter) {
+        String query = "NEET " + subject + " " + chapter;
+        return searchYouTube(query, subject, chapter);
+    }
 
     private List<VideoDTO> searchYouTube(String query, String subject, String chapter) {
         try {

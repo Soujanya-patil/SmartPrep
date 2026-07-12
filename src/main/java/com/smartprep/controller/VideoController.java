@@ -31,5 +31,13 @@ public class VideoController {
             @RequestParam String chapter) {
         String question = attentionCheckService.generateAttentionQuestion(subject, chapter);
         return ResponseEntity.ok(question);
+
     }
+    @GetMapping("/search")
+    public ResponseEntity<List<VideoDTO>> searchVideos(
+        @RequestParam String subject,
+        @RequestParam String chapter) {
+        List<VideoDTO> videos = videoRecommendationService.searchVideos(subject, chapter);
+        return ResponseEntity.ok(videos);
+}
 }
