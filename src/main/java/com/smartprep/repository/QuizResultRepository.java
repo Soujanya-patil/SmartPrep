@@ -16,4 +16,6 @@ public interface QuizResultRepository extends JpaRepository<QuizResult, Integer>
            "GROUP BY r.subject, r.chapter " +
            "HAVING AVG(r.score * 100.0 / r.totalQuestions) < 60")
     List<WeakTopicDTO> findWeakTopics(@Param("userId") int userId);
+    @Query("SELECT COUNT(r), AVG(r.score * 100.0 / r.totalQuestions) FROM QuizResult r WHERE r.userId = :userId")
+    List<Object[]> findQuizStats(@Param("userId") int userId);
 }
