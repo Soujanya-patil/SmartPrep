@@ -54,6 +54,7 @@ public class VideoRecommendationService {
                             .queryParam("q", query)
                             .queryParam("type", "video")
                             .queryParam("maxResults", "2")
+                            .queryParam("videoEmbeddable", "true")
                             .queryParam("relevanceLanguage", "en")
                             .queryParam("key", youtubeApiKey)
                             .build())
