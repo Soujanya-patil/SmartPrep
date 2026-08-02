@@ -17,15 +17,14 @@ public class MockInterviewController {
     @Autowired
     private MockInterviewService mockInterviewService;
 
-    // Generate 10 interview questions
     @GetMapping("/start")
     public ResponseEntity<List<InterviewQuestion>> startInterview(
-            @RequestParam(defaultValue = "Software Engineer") String role) {
-        List<InterviewQuestion> questions = mockInterviewService.generateQuestions(role);
+            @RequestParam(defaultValue = "Software Engineer") String role,
+            @RequestParam(defaultValue = "Java, Spring Boot, MySQL, REST APIs") String skills) {
+        List<InterviewQuestion> questions = mockInterviewService.generateQuestions(role, skills);
         return ResponseEntity.ok(questions);
     }
 
-    // Evaluate a single answer
     @PostMapping("/evaluate")
     public ResponseEntity<InterviewFeedback> evaluateAnswer(@RequestBody Map<String, String> request) {
         String question = request.get("question");
@@ -34,15 +33,7 @@ public class MockInterviewController {
         InterviewFeedback feedback = mockInterviewService.evaluateAnswer(question, answer, type);
         return ResponseEntity.ok(feedback);
     }
-    @GetMapping("/start")
-public ResponseEntity<List<InterviewQuestion>> startInterview(
-        @RequestParam(defaultValue = "Software Engineer") String role,
-        @RequestParam(defaultValue = "Java, Spring Boot, MySQL, REST APIs") String skills) {
-    List<InterviewQuestion> questions = mockInterviewService.generateQuestions(role, skills);
-    return ResponseEntity.ok(questions);
-}
 
-    // Generate final report
     @PostMapping("/report")
     public ResponseEntity<InterviewReport> generateReport(@RequestBody Map<String, Object> request) {
         int totalScore = (int) request.get("totalScore");
