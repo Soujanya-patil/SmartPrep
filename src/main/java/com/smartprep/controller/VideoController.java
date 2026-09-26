@@ -65,6 +65,26 @@ public class VideoController {
     }
 
     /**
+     * Suggests topic names for search-box autocomplete.
+     * Example: GET /api/video/suggest?q=cel&subject=Biology
+     *
+     * @param q       what the user has typed so far
+     * @param subject optional subject filter; empty or "All" means all subjects
+     * @return up to 8 topic names; empty list if none match or on error
+     */
+    @GetMapping("/suggest")
+    public ResponseEntity<List<String>> suggestTopics(
+            @RequestParam(defaultValue = "") String q,
+            @RequestParam(defaultValue = "") String subject) {
+        try {
+            return ResponseEntity.ok(videoRecommendationService.suggestTopics(q, subject));
+        } catch (Exception e) {
+            log.error("Topic suggestion failed (q='{}', subject='{}')", q, subject, e);
+            return ResponseEntity.ok(new ArrayList<>());
+        }
+    }
+
+    /**
      * Generates an attention-check question for the given subject and chapter.
      *
      * @param subject the subject being studied
