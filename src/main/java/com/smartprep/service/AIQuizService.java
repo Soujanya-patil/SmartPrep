@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.smartprep.model.QuizQuestion;
 import com.smartprep.repository.QuizQuestionRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,7 +15,9 @@ import com.smartprep.model.QuizQuestion;
 
 @Service
 public class AIQuizService {
-    
+
+    private static final Logger log = LoggerFactory.getLogger(AIQuizService.class);
+
     private final QuizQuestionRepository quizRepo;
     private final ChatClient chatClient;
     private final ObjectMapper objectMapper;
@@ -32,36 +36,42 @@ public class AIQuizService {
             List<QuizQuestion> cached = quizRepo.findBySubjectAndChapter(subject, chapter);
             
             if (!cached.isEmpty()) {
-                System.out.println("✅ Returning " + cached.size() + " cached questions for " + subject + " - " + chapter);
+                log.info("Returning {} cached questions for {} - {}", cached.size(), subject, chapter);
                 return objectMapper.writeValueAsString(cached);
             }
-            
-            // 2. Generate questions using Gemini AI
-            System.out.println("🤖 Generating new questions via Gemini AI for " + subject + " - " + chapter);
-            String prompt = buildPrompt(subject, chapter);
-            
-            String aiResponse = chatClient.prompt()
-                    .user(prompt)
-                    .call()
-                    .content();
-            
-            System.out.println("📝 AI Response received");
-            
-            // 3. Parse and save to cache
-            List<QuizQuestion> newQuestions = parseQuestions(aiResponse, subject, chapter);
-            
-            // 4. Save to database
-            List<QuizQuestion> savedQuestions = quizRepo.saveAll(newQuestions);
-            System.out.println("💾 Saved " + savedQuestions.size() + " questions to database");
-            
-            // 5. Return JSON response
+
+            // 2. Generate with Gemini AI and save to the cache
+            List<QuizQuestion> savedQuestions = generateAndSaveQuestions(subject, chapter);
+
+            // 3. Return JSON response
             return objectMapper.writeValueAsString(savedQuestions);
-            
+
         } catch (Exception e) {
-            System.err.println("❌ Error generating questions: " + e.getMessage());
-            e.printStackTrace();
+            log.error("Error generating questions for {} - {}", subject, chapter, e);
             return "{\"error\": \"Failed to generate questions: " + e.getMessage() + "\"}";
         }
+    }
+
+    /**
+     * Asks Gemini for 10 questions on a chapter and saves them to quiz_questions, so later
+     * requests for the same chapter are served from the database. Makes exactly one AI call.
+     *
+     * @param subject the subject the questions are saved under
+     * @param chapter the chapter the questions are saved under
+     * @return the saved questions
+     * @throws RuntimeException if the AI call fails (e.g. daily quota reached) or its reply can't be parsed
+     */
+    public List<QuizQuestion> generateAndSaveQuestions(String subject, String chapter) {
+        log.info("Generating new questions via Gemini AI for {} - {}", subject, chapter);
+        String aiResponse = chatClient.prompt()
+                .user(buildPrompt(subject, chapter))
+                .call()
+                .content();
+        log.info("AI response received for {} - {}", subject, chapter);
+
+        List<QuizQuestion> savedQuestions = quizRepo.saveAll(parseQuestions(aiResponse, subject, chapter));
+        log.info("Saved {} questions to database for {} - {}", savedQuestions.size(), subject, chapter);
+        return savedQuestions;
     }
     
    private String buildPrompt(String subject, String chapter) {

@@ -1,6 +1,7 @@
 package com.smartprep.controller;
 
 import com.smartprep.dto.VideoDTO;
+import com.smartprep.service.AttentionCheckException;
 import com.smartprep.service.AttentionCheckService;
 import com.smartprep.service.VideoRecommendationService;
 import com.smartprep.service.YouTubeUnavailableException;
@@ -93,18 +94,29 @@ public class VideoController {
     }
 
     /**
-     * Generates an attention-check question for the given subject and chapter.
+     * Returns a multiple-choice attention-check question for the video being watched,
+     * served from cached quiz questions where possible.
+     * Example: GET /api/video/attention-check?subject=Biology&chapter=Cell Cycle
      *
-     * @param subject the subject being studied
-     * @param chapter the chapter being studied
-     * @return the generated question text
+     * @param subject the video's subject; "General" or blank for search results
+     * @param chapter the video's chapter, or the searched text
+     * @return 200 with the question; 503 { message } if the AI daily limit is reached and nothing
+     *         is cached; 502 { message } for any other failure
      */
     @GetMapping("/attention-check")
-    public ResponseEntity<String> getAttentionCheck(
-            @RequestParam String subject,
-            @RequestParam String chapter) {
-        String question = attentionCheckService.generateAttentionQuestion(subject, chapter);
-        return ResponseEntity.ok(question);
+    public ResponseEntity<?> getAttentionCheck(
+            @RequestParam(defaultValue = "") String subject,
+            @RequestParam(defaultValue = "") String chapter) {
+        try {
+            return ResponseEntity.ok(attentionCheckService.getAttentionQuestion(subject, chapter));
+        } catch (AttentionCheckException e) {
+            HttpStatus status = e.isQuotaExhausted() ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.BAD_GATEWAY;
+            return ResponseEntity.status(status).body(Map.of("message", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Attention check failed (subject='{}', chapter='{}')", subject, chapter, e);
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(Map.of("message", "Couldn't load an attention question right now."));
+        }
     }
 
     private ResponseEntity<Map<String, String>> youtubeUnavailable(YouTubeUnavailableException e) {
