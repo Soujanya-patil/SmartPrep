@@ -12,13 +12,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Finds NEET study videos on YouTube, either from a user's weak topics or from a free-text search.
@@ -36,6 +40,18 @@ public class VideoRecommendationService {
 
     /** Topic suggestions returned for one autocomplete query. */
     private static final int SUGGEST_MAX_RESULTS = 8;
+
+    /**
+     * How long YouTube results are reused. Each search costs 100 of the API key's 10,000 daily
+     * quota units, and the dashboard asks for every weak topic on each visit, so without a cache
+     * the quota runs out after a few dozen page loads.
+     */
+    private static final Duration CACHE_TTL = Duration.ofHours(12);
+
+    private record CachedVideos(List<VideoDTO> videos, Instant expiresAt) {}
+
+    /** Successful YouTube results by query + maxResults; in memory, so a restart clears it. */
+    private final Map<String, CachedVideos> youtubeCache = new ConcurrentHashMap<>();
 
     @Autowired
     private QuizResultRepository quizResultRepository;
@@ -63,16 +79,24 @@ public class VideoRecommendationService {
      *
      * @param userId the user's id
      * @return videos for all weak topics; empty list if the user has none
+     * @throws YouTubeUnavailableException if the user has weak topics but no video could be fetched
      */
     public List<VideoDTO> recommendVideos(int userId) {
         List<WeakTopicDTO> weakTopics = quizResultRepository.findWeakTopics(userId);
         if (weakTopics.isEmpty()) return new ArrayList<>();
 
         List<VideoDTO> allVideos = new ArrayList<>();
+        YouTubeUnavailableException failure = null;
         for (WeakTopicDTO topic : weakTopics) {
             String query = "NEET " + topic.getSubject() + " " + topic.getChapter();
-            allVideos.addAll(searchYouTube(query, topic.getSubject(), topic.getChapter(), RECOMMEND_MAX_RESULTS));
+            try {
+                allVideos.addAll(searchYouTube(query, topic.getSubject(), topic.getChapter(), RECOMMEND_MAX_RESULTS));
+            } catch (YouTubeUnavailableException e) {
+                // Keep going: topics already in the cache can still be shown
+                failure = e;
+            }
         }
+        if (allVideos.isEmpty() && failure != null) throw failure;
         return allVideos;
     }
 
@@ -81,7 +105,8 @@ public class VideoRecommendationService {
      *
      * @param subject optional subject; null or blank means all subjects
      * @param chapter the search query / topic; null or blank returns an empty list
-     * @return matching videos; empty list if nothing is found or the search fails
+     * @return matching videos; empty list if nothing is found
+     * @throws YouTubeUnavailableException if YouTube cannot be searched
      */
     public List<VideoDTO> searchVideos(String subject, String chapter) {
         String cleanSubject = subject == null ? "" : subject.trim();
@@ -146,9 +171,14 @@ public class VideoRecommendationService {
      * @param subject    subject to tag each result with
      * @param chapter    chapter to tag each result with
      * @param maxResults maximum number of videos to return
-     * @return list of videos; empty list on any error
+     * @return list of videos (successful results are cached for {@link #CACHE_TTL})
+     * @throws YouTubeUnavailableException if the request fails (quota used up, bad key, network error)
      */
     private List<VideoDTO> searchYouTube(String query, String subject, String chapter, int maxResults) {
+        String cacheKey = query.toLowerCase(Locale.ROOT) + "|" + maxResults;
+        CachedVideos cached = youtubeCache.get(cacheKey);
+        if (cached != null && cached.expiresAt().isAfter(Instant.now())) return cached.videos();
+
         try {
             String response = webClient.get()
                     .uri(uriBuilder -> uriBuilder
@@ -180,11 +210,24 @@ public class VideoRecommendationService {
                 String thumbnail = "https://img.youtube.com/vi/" + videoId + "/0.jpg";
                 videos.add(new VideoDTO(subject, chapter, title, channel, youtubeUrl, thumbnail));
             }
-            return videos;
+            List<VideoDTO> result = List.copyOf(videos);
+            youtubeCache.put(cacheKey, new CachedVideos(result, Instant.now().plus(CACHE_TTL)));
+            return result;
 
+        } catch (WebClientResponseException e) {
+            int status = e.getStatusCode().value();
+            if (status == 403 || status == 429) {
+                // quotaExceeded / rateLimitExceeded; the response body says which
+                log.warn("YouTube quota error ({}) for query '{}': {}", status, query, e.getResponseBodyAsString());
+                throw new YouTubeUnavailableException(
+                        "YouTube's daily search limit has been reached, so videos can't be loaded right now. "
+                                + "The limit resets every day at midnight Pacific time.", e);
+            }
+            log.error("YouTube search failed ({}) for query '{}'", status, query, e);
+            throw new YouTubeUnavailableException("YouTube search failed (HTTP " + status + ").", e);
         } catch (Exception e) {
             log.error("YouTube search failed for query '{}'", query, e);
-            return new ArrayList<>();
+            throw new YouTubeUnavailableException("Couldn't reach YouTube. Check the internet connection and try again.", e);
         }
     }
 }

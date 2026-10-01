@@ -3,14 +3,17 @@ package com.smartprep.controller;
 import com.smartprep.dto.VideoDTO;
 import com.smartprep.service.AttentionCheckService;
 import com.smartprep.service.VideoRecommendationService;
+import com.smartprep.service.YouTubeUnavailableException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * REST endpoints for YouTube video recommendations, search and attention checks.
@@ -32,12 +35,15 @@ public class VideoController {
      * Recommends videos for the user's weak topics (based on quiz results).
      *
      * @param userId the user's id
-     * @return list of recommended videos; empty list if none or on error
+     * @return list of recommended videos (empty if the user has no weak topics);
+     *         503 with a {@code message} if YouTube is unavailable
      */
     @GetMapping("/recommend/{userId}")
-    public ResponseEntity<List<VideoDTO>> recommendVideos(@PathVariable int userId) {
+    public ResponseEntity<?> recommendVideos(@PathVariable int userId) {
         try {
             return ResponseEntity.ok(videoRecommendationService.recommendVideos(userId));
+        } catch (YouTubeUnavailableException e) {
+            return youtubeUnavailable(e);
         } catch (Exception e) {
             log.error("Failed to recommend videos for user {}", userId, e);
             return ResponseEntity.ok(new ArrayList<>());
@@ -50,14 +56,16 @@ public class VideoController {
      *
      * @param subject optional subject filter (Physics, Chemistry, Biology); empty means all subjects
      * @param chapter the search query / topic; empty returns an empty list
-     * @return list of matching videos; empty list if none or on error
+     * @return list of matching videos (empty if none); 503 with a {@code message} if YouTube is unavailable
      */
     @GetMapping("/search")
-    public ResponseEntity<List<VideoDTO>> searchVideos(
+    public ResponseEntity<?> searchVideos(
             @RequestParam(defaultValue = "") String subject,
             @RequestParam(defaultValue = "") String chapter) {
         try {
             return ResponseEntity.ok(videoRecommendationService.searchVideos(subject, chapter));
+        } catch (YouTubeUnavailableException e) {
+            return youtubeUnavailable(e);
         } catch (Exception e) {
             log.error("Video search failed (subject='{}', chapter='{}')", subject, chapter, e);
             return ResponseEntity.ok(new ArrayList<>());
@@ -97,5 +105,9 @@ public class VideoController {
             @RequestParam String chapter) {
         String question = attentionCheckService.generateAttentionQuestion(subject, chapter);
         return ResponseEntity.ok(question);
+    }
+
+    private ResponseEntity<Map<String, String>> youtubeUnavailable(YouTubeUnavailableException e) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("message", e.getMessage()));
     }
 }
