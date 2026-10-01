@@ -66,7 +66,7 @@ public class AIQuizService {
     
    private String buildPrompt(String subject, String chapter) {
     return """
-    Generate 5 multiple-choice questions for NEET preparation. Subject: %s, Chapter: %s.
+    Generate 10 multiple-choice questions for NEET preparation. Subject: %s, Chapter: %s.
     
     Return ONLY valid JSON array. Each object must have:
     - questionText: string
@@ -82,7 +82,7 @@ public class AIQuizService {
         "explanation": "Photosynthesis is how plants make food."
     }
     
-    Generate 5 questions now:
+    Generate 10 questions now:
     """.formatted(subject, chapter);
 }
     
