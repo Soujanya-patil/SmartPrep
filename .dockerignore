@@ -1,0 +1,11 @@
+.git
+target
+smartprep
+postman
+.postman
+.idea
+.vscode
+*.iml
+notes.txt
+# Local secrets; the image uses application-prod.properties + env vars instead
+src/main/resources/application.properties
