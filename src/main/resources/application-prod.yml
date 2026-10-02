@@ -1,0 +1,47 @@
+# Production profile (Docker / Render). Secrets come from environment variables.
+spring:
+  application:
+    name: smartprep
+
+  # MySQL
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: "${DB_PASSWORD}"
+
+  # JPA
+  jpa:
+    database-platform: org.hibernate.dialect.MySQL8Dialect
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+
+  # Gemini AI (OpenAI-compatible endpoint)
+  ai:
+    openai:
+      api-key: "${GEMINI_API_KEY}"
+      base-url: "https://generativelanguage.googleapis.com/v1beta/openai"
+      chat:
+        options:
+          model: gemini-2.5-flash
+          temperature: 0.7
+
+  # Mail (parent report)
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: "${MAIL_USERNAME:}"
+    password: "${MAIL_PASSWORD:}"
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+      mail.smtp.connectiontimeout: 10000
+      mail.smtp.timeout: 10000
+      mail.smtp.writetimeout: 10000
+server:
+  port: "${PORT:8081}"
+
+# YouTube
+youtube:
+  api:
+    key: ${YOUTUBE_API_KEY}
