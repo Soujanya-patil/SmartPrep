@@ -1,10 +1,13 @@
 package com.smartprep.controller;
 
+import com.smartprep.dto.UserResponse;
 import com.smartprep.model.User;
 import com.smartprep.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import java.util.Map;
 import java.util.Optional;
 
 @RestController
@@ -25,11 +28,12 @@ public class UserController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<String> login(@RequestBody User user) {
+    public ResponseEntity<?> login(@RequestBody User user) {
         Optional<User> found = userService.login(user.getEmail(), user.getPassword());
         if (found.isPresent()) {
-            return ResponseEntity.ok("Login successful! Welcome " + found.get().getName());
+            return ResponseEntity.ok(new UserResponse(found.get()));
         }
-        return ResponseEntity.badRequest().body("Invalid email or password!");
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("message", "Invalid email or password"));
     }
 }

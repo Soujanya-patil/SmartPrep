@@ -1,5 +1,6 @@
 package com.smartprep.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
@@ -16,6 +17,8 @@ public class User {
     @Column(unique = true)
     private String email;
 
+    // Accepted in requests, never written to JSON responses
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String password;
 
     @Enumerated(EnumType.STRING)
