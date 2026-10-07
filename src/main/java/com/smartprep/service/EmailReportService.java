@@ -1,5 +1,7 @@
 package com.smartprep.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartprep.dto.DashboardDTO;
 import com.smartprep.dto.WeakTopicDTO;
 import jakarta.mail.internet.MimeMessage;
@@ -7,16 +9,22 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.util.HtmlUtils;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Builds the daily SmartPrep progress report and emails it to the parent and the student.
@@ -26,14 +34,13 @@ public class EmailReportService {
 
     private static final Logger log = LoggerFactory.getLogger(EmailReportService.class);
 
-    /** Every report goes to both addresses, each as its own email. */
-    public static final List<String> RECIPIENTS = List.of(
-            "dwd.shekhar@gmail.com",
-            "soujanya.patil2003@gmail.com"
-    );
-
     private static final double WEAK_THRESHOLD = 60.0;
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("d MMM yyyy");
+    private static final Duration BREVO_TIMEOUT = Duration.ofSeconds(15);
+    private static final Pattern EMAIL_PATTERN = Pattern.compile("[^\\s@<>\"']+@[^\\s@<>\"']+");
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    private final WebClient webClient = WebClient.create();
 
     @Autowired
     private JavaMailSender mailSender;
@@ -47,6 +54,23 @@ public class EmailReportService {
     @Value("${spring.mail.username:}")
     private String fromAddress;
 
+    /** Comma-separated; every report goes to each address as its own email. No default on purpose. */
+    @Value("${REPORT_RECIPIENTS:}")
+    private String reportRecipients;
+
+    /** When set, mail goes through Brevo's HTTPS API instead of SMTP (Render's free plan blocks SMTP). */
+    @Value("${BREVO_API_KEY:}")
+    private String brevoApiKey;
+
+    @Value("${MAIL_FROM_EMAIL:${spring.mail.username:}}")
+    private String brevoFromEmail;
+
+    @Value("${MAIL_FROM_NAME:SmartPrep}")
+    private String brevoFromName;
+
+    @Value("${brevo.base-url:https://api.brevo.com}")
+    private String brevoBaseUrl;
+
     /**
      * Result of sending one report: which recipients got it and which failed.
      *
@@ -54,42 +78,114 @@ public class EmailReportService {
      * @param failedTo addresses that could not be sent to
      */
     public record SendResult(List<String> sentTo, List<String> failedTo) {
-        /** @return true if every recipient was sent the report */
-        public boolean allSent() { return failedTo.isEmpty(); }
+        /** @return true if the report was sent and every recipient got it */
+        public boolean allSent() { return !sentTo.isEmpty() && failedTo.isEmpty(); }
     }
 
     /**
      * Fetches the student's dashboard and daily study hours, then emails the HTML report to
-     * every address in {@link #RECIPIENTS}. A failure for one recipient does not stop the other.
+     * every address in REPORT_RECIPIENTS. A failure for one recipient does not stop the others.
+     * Sends nothing (and logs a warning) if REPORT_RECIPIENTS is not set.
      *
      * @param userId the student's user id
      * @return which recipients were sent the report and which failed
      */
     public SendResult sendWeeklyReport(int userId) {
+        List<String> recipients = getRecipients();
+        if (recipients.isEmpty()) {
+            log.warn("REPORT_RECIPIENTS is not set; report for user {} was not sent", userId);
+            return new SendResult(List.of(), List.of());
+        }
+
         DashboardDTO dashboard = dashboardService.getDashboard(userId);
         double weekHours = getWeekHours(userId);
 
         String subject = "SmartPrep Weekly Report – " + dashboard.getName();
         String html = buildHtml(dashboard, weekHours);
+        String text = buildPlainText(dashboard, weekHours);
 
         List<String> sentTo = new ArrayList<>();
         List<String> failedTo = new ArrayList<>();
-        for (String recipient : RECIPIENTS) {
+        for (int i = 0; i < recipients.size(); i++) {
+            String recipient = recipients.get(i);
             try {
-                MimeMessage message = mailSender.createMimeMessage();
-                MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
-                if (!fromAddress.isBlank()) helper.setFrom(fromAddress, "SmartPrep");
-                helper.setTo(recipient);
-                helper.setSubject(subject);
-                helper.setText(buildPlainText(dashboard, weekHours), html);
-                mailSender.send(message);
+                if (brevoApiKey.isBlank()) {
+                    sendViaSmtp(recipient, subject, text, html);
+                } else {
+                    sendViaBrevo(recipient, subject, text, html);
+                }
                 sentTo.add(recipient);
             } catch (Exception e) {
-                log.error("Failed to send daily report for user {} to {}", userId, recipient, e);
+                // Never log addresses, the API key or the email body
+                log.error("Failed to send daily report for user {} to recipient {} of {}: {} {}",
+                        userId, i + 1, recipients.size(), e.getClass().getSimpleName(), redact(e.getMessage()));
                 failedTo.add(recipient);
             }
         }
         return new SendResult(sentTo, failedTo);
+    }
+
+    private List<String> getRecipients() {
+        return Arrays.stream(reportRecipients.split(","))
+                .map(String::trim)
+                .filter(address -> !address.isEmpty())
+                .toList();
+    }
+
+    private void sendViaSmtp(String recipient, String subject, String text, String html) throws Exception {
+        MimeMessage message = mailSender.createMimeMessage();
+        MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+        if (!fromAddress.isBlank()) helper.setFrom(fromAddress, "SmartPrep");
+        helper.setTo(recipient);
+        helper.setSubject(subject);
+        helper.setText(text, html);
+        mailSender.send(message);
+    }
+
+    /** POST https://api.brevo.com/v3/smtp/email; any 2xx (201 Created) counts as sent. */
+    private void sendViaBrevo(String recipient, String subject, String text, String html) {
+        if (brevoFromEmail.isBlank()) {
+            throw new IllegalStateException("MAIL_FROM_EMAIL is not set");
+        }
+        Map<String, Object> payload = Map.of(
+                "sender", Map.of("name", brevoFromName, "email", brevoFromEmail),
+                "to", List.of(Map.of("email", recipient)),
+                "subject", subject,
+                "htmlContent", html,
+                "textContent", text);
+
+        ResponseEntity<String> response = webClient.post()
+                .uri(brevoBaseUrl + "/v3/smtp/email")
+                .header("api-key", brevoApiKey)
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.APPLICATION_JSON)
+                .bodyValue(payload)
+                .exchangeToMono(r -> r.toEntity(String.class))
+                .block(BREVO_TIMEOUT);
+
+        if (response == null || !response.getStatusCode().is2xxSuccessful()) {
+            int status = response == null ? 0 : response.getStatusCode().value();
+            throw new IllegalStateException("Brevo returned HTTP " + status + ": "
+                    + brevoErrorMessage(response == null ? null : response.getBody()));
+        }
+    }
+
+    /** Extracts Brevo's {"code","message"} error text; never the raw body. */
+    private static String brevoErrorMessage(String body) {
+        try {
+            JsonNode node = JSON.readTree(body == null ? "" : body);
+            if (node != null && node.hasNonNull("message")) {
+                return node.path("code").asText("") + " " + node.get("message").asText();
+            }
+        } catch (Exception ignored) {
+            // not JSON
+        }
+        return "(no error message)";
+    }
+
+    /** Masks anything that looks like an email address. */
+    private static String redact(String text) {
+        return text == null ? "" : EMAIL_PATTERN.matcher(text).replaceAll("<email>");
     }
 
     /** Sums hoursStudied over the last 7 days (including today); 0 if anything goes wrong. */

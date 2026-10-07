@@ -41,6 +41,11 @@ spring:
 server:
   port: "${PORT:8081}"
 
+# Nightly report scheduler: off on Render, where an external cron calls /api/report/cron/send
+report:
+  scheduler:
+    enabled: ${REPORT_SCHEDULER_ENABLED:false}
+
 # YouTube
 youtube:
   api:
